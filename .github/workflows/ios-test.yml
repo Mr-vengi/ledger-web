@@ -1,0 +1,48 @@
+name: iOS Build and Test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.35.1'
+        channel: 'stable'
+        
+    - name: Install dependencies
+      run: |
+        cd ledger
+        flutter pub get
+        
+    - name: Setup iOS
+      run: |
+        cd ledger/ios
+        pod install
+        
+    - name: Build iOS (Debug)
+      run: |
+        cd ledger
+        flutter build ios --debug --no-codesign
+        
+    - name: Build iOS (Release)
+      run: |
+        cd ledger
+        flutter build ios --release --no-codesign
+        
+    - name: Run tests
+      run: |
+        cd ledger
+        flutter test
+

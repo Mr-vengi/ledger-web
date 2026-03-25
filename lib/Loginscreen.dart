@@ -5,7 +5,8 @@ import 'package:crypto/crypto.dart';
 import 'dart:convert';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:device_info_plus/device_info_plus.dart';
-import 'dart:io';
+import 'dart:io' as io;
+import 'package:flutter/foundation.dart'; // For kIsWeb
 import 'ledgerlist.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -41,6 +42,10 @@ class _LoginScreenState extends State<LoginScreen>
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
 
+  // ✅ CORRECTED: Helper to detect platform using kIsWeb
+  bool get _isWeb => kIsWeb;
+  bool get _isMobile => !kIsWeb;
+
   @override
   void initState() {
     super.initState();
@@ -71,17 +76,28 @@ class _LoginScreenState extends State<LoginScreen>
     return sha256.convert(utf8.encode(password)).toString();
   }
 
-  /// Get device IMEI/ID
+  /// Get device IMEI/ID (Web compatible)
   Future<String?> _getDeviceImei() async {
     try {
+      // For web, generate and store a persistent ID
+      if (_isWeb) {
+        final prefs = await SharedPreferences.getInstance();
+        String? deviceId = prefs.getString('web_device_id');
+        if (deviceId == null) {
+          deviceId = 'web_${DateTime.now().millisecondsSinceEpoch}_${_generateRandomString(16)}';
+          await prefs.setString('web_device_id', deviceId);
+        }
+        debugPrint('🌐 Web Device ID: $deviceId');
+        return deviceId;
+      }
+
+      // For mobile platforms
       final deviceInfo = DeviceInfoPlugin();
-      if (Platform.isAndroid) {
+      if (io.Platform.isAndroid) {
         final androidInfo = await deviceInfo.androidInfo;
-        // Use Android ID as device identifier
         return androidInfo.id;
-      } else if (Platform.isIOS) {
+      } else if (io.Platform.isIOS) {
         final iosInfo = await deviceInfo.iosInfo;
-        // Use Identifier for Vendor as device identifier
         return iosInfo.identifierForVendor;
       }
       return null;
@@ -91,9 +107,25 @@ class _LoginScreenState extends State<LoginScreen>
     }
   }
 
+  String _generateRandomString(int length) {
+    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+    final random = DateTime.now().millisecondsSinceEpoch;
+    String result = '';
+    for (int i = 0; i < length; i++) {
+      result += chars[random % chars.length];
+    }
+    return result;
+  }
+
   /// Verify device IMEI matches stored IMEI
   Future<bool> _verifyDeviceImei(String collectionName) async {
     try {
+      // Skip IMEI check on web
+      if (_isWeb) {
+        debugPrint('🌐 Web platform - skipping device verification');
+        return true;
+      }
+
       // Get stored IMEI from Firestore
       final credDoc = await FirebaseFirestore.instance
           .collection(collectionName)
@@ -125,7 +157,7 @@ class _LoginScreenState extends State<LoginScreen>
       // Compare IMEIs
       final isMatch = storedImei.trim() == currentImei.trim();
       debugPrint('IMEI Check - Stored: $storedImei, Current: $currentImei, Match: $isMatch');
-      
+
       return isMatch;
     } catch (e) {
       debugPrint('Error verifying device IMEI: $e');
@@ -179,20 +211,20 @@ class _LoginScreenState extends State<LoginScreen>
 
       return snapshot.docs
           .map((doc) {
-            final data = doc.data();
-            if (data['status'] != 'active') {
-              return null;
-            }
+        final data = doc.data();
+        if (data['status'] != 'active') {
+          return null;
+        }
 
-            return {
-              'shopId': doc.id,
-              'shopName': data['shopName'] ?? 'Unknown Shop',
-              'location': data['location'] ?? '',
-              'phone': data['phone'] ?? '',
-              'username': data['username'] ?? '',
-              'collectionName': data['collectionName'] ?? '',
-            };
-          })
+        return {
+          'shopId': doc.id,
+          'shopName': data['shopName'] ?? 'Unknown Shop',
+          'location': data['location'] ?? '',
+          'phone': data['phone'] ?? '',
+          'username': data['username'] ?? '',
+          'collectionName': data['collectionName'] ?? '',
+        };
+      })
           .whereType<Map<String, dynamic>>()
           .toList();
     } catch (e) {
@@ -202,10 +234,10 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   Future<bool> _verifyEmployeeCredentialsForShop(
-    String collectionName,
-    String username,
-    String password,
-  ) async {
+      String collectionName,
+      String username,
+      String password,
+      ) async {
     try {
       debugPrint('🔍 Verifying credentials for collection: $collectionName');
       debugPrint('🔍 Username: $username');
@@ -245,10 +277,10 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   Future<Map<String, dynamic>?> _getEmployeeDetailsForShop(
-    String collectionName,
-    String shopId,
-    String shopName,
-  ) async {
+      String collectionName,
+      String shopId,
+      String shopName,
+      ) async {
     try {
       final credentialsSnapshot = await FirebaseFirestore.instance
           .collection(collectionName)
@@ -273,9 +305,9 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   Future<bool> _verifyClientCredentials(
-    String username,
-    String password,
-  ) async {
+      String username,
+      String password,
+      ) async {
     try {
       final snapshot = await FirebaseFirestore.instance
           .collection('adminlogin')
@@ -313,14 +345,14 @@ class _LoginScreenState extends State<LoginScreen>
     try {
       // Normalize phone number (remove +, spaces, etc.)
       String normalizedPhone = phoneNumber.replaceAll(RegExp(r'[+\s-]'), '');
-      
+
       // Remove leading + if present
       if (normalizedPhone.startsWith('+')) {
         normalizedPhone = normalizedPhone.substring(1);
       }
-      
+
       debugPrint('🔍 Searching for phone number: $normalizedPhone');
-      
+
       // Get all adminlogin documents (since we can't query by phoneNumber if field doesn't exist)
       final snapshot = await FirebaseFirestore.instance
           .collection('adminlogin')
@@ -333,28 +365,28 @@ class _LoginScreenState extends State<LoginScreen>
         final data = doc.data();
         final docPhone = data['phoneNumber']?.toString() ?? '';
         final docUsername = data['username']?.toString() ?? '';
-        
+
         debugPrint('📄 Checking document: username=$docUsername, phoneNumber=$docPhone');
-        
+
         if (docPhone.isEmpty) {
           debugPrint('⚠️ Document has no phoneNumber field');
           continue;
         }
-        
+
         // Normalize document phone number
         String normalizedDocPhone = docPhone.replaceAll(RegExp(r'[+\s-]'), '');
         if (normalizedDocPhone.startsWith('+')) {
           normalizedDocPhone = normalizedDocPhone.substring(1);
         }
-        
+
         debugPrint('🔍 Comparing: input=$normalizedPhone vs stored=$normalizedDocPhone');
-        
+
         // Try exact match
         if (normalizedDocPhone == normalizedPhone) {
           debugPrint('✅ Exact match found!');
           return data;
         }
-        
+
         // Try with country code variations (for Indian numbers)
         if (normalizedPhone.length == 10 && normalizedDocPhone == '91$normalizedPhone') {
           debugPrint('✅ Match found with country code!');
@@ -364,7 +396,7 @@ class _LoginScreenState extends State<LoginScreen>
           debugPrint('✅ Match found (input had country code)!');
           return data;
         }
-        
+
         // Try last 10 digits match (in case of different formats)
         if (normalizedPhone.length >= 10 && normalizedDocPhone.length >= 10) {
           final last10Input = normalizedPhone.substring(normalizedPhone.length - 10);
@@ -375,7 +407,7 @@ class _LoginScreenState extends State<LoginScreen>
           }
         }
       }
-      
+
       debugPrint('❌ No matching phone number found');
       return null;
     } catch (e) {
@@ -384,8 +416,18 @@ class _LoginScreenState extends State<LoginScreen>
     }
   }
 
-  /// Send OTP to phone number
+  /// Send OTP to phone number (Mobile only)
   Future<void> _sendOTP(String phoneNumber) async {
+    // On web, show message that OTP is mobile-only
+    if (_isWeb) {
+      _showErrorSnackBar('OTP login is only available on mobile devices. Please use username & password login instead.');
+      setState(() {
+        _showClientOTPLogin = false;
+        _showClientPasswordLogin = true;
+      });
+      return;
+    }
+
     try {
       setState(() => _isLoading = true);
 
@@ -394,8 +436,8 @@ class _LoginScreenState extends State<LoginScreen>
       if (adminData == null) {
         _showErrorSnackBar(
           'Phone number not registered.\n\n'
-          'Please add "phoneNumber" field to adminlogin collection in Firebase.\n'
-          'Or use Username & Password login instead.',
+              'Please add "phoneNumber" field to adminlogin collection in Firebase.\n'
+              'Or use Username & Password login instead.',
         );
         setState(() => _isLoading = false);
         return;
@@ -416,7 +458,6 @@ class _LoginScreenState extends State<LoginScreen>
       await FirebaseAuth.instance.verifyPhoneNumber(
         phoneNumber: formattedPhone,
         verificationCompleted: (PhoneAuthCredential credential) async {
-          // Auto-verification completed
           try {
             await _signInWithCredential(credential);
           } catch (e) {
@@ -488,10 +529,10 @@ class _LoginScreenState extends State<LoginScreen>
   Future<void> _signInWithCredential(PhoneAuthCredential credential) async {
     try {
       final userCredential = await FirebaseAuth.instance.signInWithCredential(credential);
-      
+
       // Get admin details from Firestore using phone number
       final adminData = await _verifyPhoneNumberInAdminLogin(_phoneNumber);
-      
+
       if (adminData == null) {
         await FirebaseAuth.instance.signOut();
         if (mounted) {
@@ -520,7 +561,7 @@ class _LoginScreenState extends State<LoginScreen>
             context,
             PageRouteBuilder(
               pageBuilder: (context, animation, secondaryAnimation) =>
-                  const LedgerListScreen(),
+              const LedgerListScreen(),
               transitionsBuilder:
                   (context, animation, secondaryAnimation, child) {
                 return FadeTransition(opacity: animation, child: child);
@@ -530,13 +571,11 @@ class _LoginScreenState extends State<LoginScreen>
           );
         } catch (navError) {
           debugPrint('Navigation error: $navError');
-          // If navigation fails, reset loading state
           if (mounted) {
             setState(() => _isLoading = false);
           }
         }
       } else {
-        // If widget is not mounted, reset loading state
         setState(() => _isLoading = false);
       }
     } catch (e) {
@@ -587,55 +626,53 @@ class _LoginScreenState extends State<LoginScreen>
       }
 
       final clientDetails = await _getClientDetails(username);
-      
-      // Get email from adminlogin for Firebase Auth
-      final email = clientDetails?['email'] as String?;
-      
-      // Sign in to Firebase Auth if email exists
-      if (email != null && email.isNotEmpty) {
-        try {
-          await FirebaseAuth.instance.signInWithEmailAndPassword(
-            email: email,
-            password: password,
-          );
-          debugPrint('✅ Signed in to Firebase Auth as client');
-        } catch (authError) {
-          debugPrint('⚠️ Could not sign in to Firebase Auth: $authError');
-          // Continue anyway - Firestore credentials are valid
-        }
-      } else {
-        // Create email if it doesn't exist (for backward compatibility)
-        final adminDoc = await FirebaseFirestore.instance
-            .collection('adminlogin')
-            .where('username', isEqualTo: username)
-            .limit(1)
-            .get();
-        
-        if (adminDoc.docs.isNotEmpty) {
-          final emailToCreate = '$username@admin.ledger.local';
+
+      // Skip Firebase Auth on web if there are issues
+      if (!_isWeb) {
+        final email = clientDetails?['email'] as String?;
+
+        // Sign in to Firebase Auth if email exists
+        if (email != null && email.isNotEmpty) {
           try {
-            // Try to create Firebase Auth user
-            final userCredential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
-              email: emailToCreate,
+            await FirebaseAuth.instance.signInWithEmailAndPassword(
+              email: email,
               password: password,
             );
-            debugPrint('✅ Created Firebase Auth user for client');
-            
-            // Update Firestore with email
-            await adminDoc.docs.first.reference.update({
-              'email': emailToCreate,
-              'authUid': userCredential.user?.uid,
-            });
-          } catch (e) {
-            // User might already exist, try to sign in
+            debugPrint('✅ Signed in to Firebase Auth as client');
+          } catch (authError) {
+            debugPrint('⚠️ Could not sign in to Firebase Auth: $authError');
+          }
+        } else {
+          // Create email if it doesn't exist (for backward compatibility)
+          final adminDoc = await FirebaseFirestore.instance
+              .collection('adminlogin')
+              .where('username', isEqualTo: username)
+              .limit(1)
+              .get();
+
+          if (adminDoc.docs.isNotEmpty) {
+            final emailToCreate = '$username@admin.ledger.local';
             try {
-              await FirebaseAuth.instance.signInWithEmailAndPassword(
+              final userCredential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
                 email: emailToCreate,
                 password: password,
               );
-              debugPrint('✅ Signed in to existing Firebase Auth user');
-            } catch (signInError) {
-              debugPrint('⚠️ Could not sign in to Firebase Auth: $signInError');
+              debugPrint('✅ Created Firebase Auth user for client');
+
+              await adminDoc.docs.first.reference.update({
+                'email': emailToCreate,
+                'authUid': userCredential.user?.uid,
+              });
+            } catch (e) {
+              try {
+                await FirebaseAuth.instance.signInWithEmailAndPassword(
+                  email: emailToCreate,
+                  password: password,
+                );
+                debugPrint('✅ Signed in to existing Firebase Auth user');
+              } catch (signInError) {
+                debugPrint('⚠️ Could not sign in to Firebase Auth: $signInError');
+              }
             }
           }
         }
@@ -656,11 +693,11 @@ class _LoginScreenState extends State<LoginScreen>
           context,
           PageRouteBuilder(
             pageBuilder: (context, animation, secondaryAnimation) =>
-                const LedgerListScreen(),
+            const LedgerListScreen(),
             transitionsBuilder:
                 (context, animation, secondaryAnimation, child) {
-                  return FadeTransition(opacity: animation, child: child);
-                },
+              return FadeTransition(opacity: animation, child: child);
+            },
             transitionDuration: const Duration(milliseconds: 400),
           ),
         );
@@ -729,12 +766,12 @@ class _LoginScreenState extends State<LoginScreen>
         return;
       }
 
-      // Verify device IMEI
+      // Verify device IMEI (skip on web)
       final imeiValid = await _verifyDeviceImei(collectionName);
       if (!imeiValid) {
         _showErrorSnackBar(
           'This device is not eligible.\n\n'
-          'Access denied: This device is not authorized. Please contact admin.',
+              'Access denied: This device is not authorized. Please contact admin.',
         );
         setState(() => _isLoading = false);
         return;
@@ -765,11 +802,11 @@ class _LoginScreenState extends State<LoginScreen>
           context,
           PageRouteBuilder(
             pageBuilder: (context, animation, secondaryAnimation) =>
-                const LedgerListScreen(),
+            const LedgerListScreen(),
             transitionsBuilder:
                 (context, animation, secondaryAnimation, child) {
-                  return FadeTransition(opacity: animation, child: child);
-                },
+              return FadeTransition(opacity: animation, child: child);
+            },
             transitionDuration: const Duration(milliseconds: 400),
           ),
         );
@@ -865,8 +902,8 @@ class _LoginScreenState extends State<LoginScreen>
             physics: const BouncingScrollPhysics(),
             child: ConstrainedBox(
               constraints: BoxConstraints(
-                minHeight: size.height - 
-                    MediaQuery.of(context).padding.top - 
+                minHeight: size.height -
+                    MediaQuery.of(context).padding.top -
                     MediaQuery.of(context).padding.bottom,
               ),
               child: IntrinsicHeight(
@@ -948,7 +985,7 @@ class _LoginScreenState extends State<LoginScreen>
                             child: _showClientPasswordLogin
                                 ? _buildClientPasswordLoginView()
                                 : _showClientOTPLogin
-                                    ? _buildClientOTPLoginView()
+                                ? _buildClientOTPLoginView()
                                 : _buildMainLoginView(),
                           ),
                         ),
@@ -963,6 +1000,7 @@ class _LoginScreenState extends State<LoginScreen>
       ),
     );
   }
+
 
   Widget _buildMainLoginView() {
     return SingleChildScrollView(
@@ -997,13 +1035,13 @@ class _LoginScreenState extends State<LoginScreen>
             onPressed: _isLoading
                 ? null
                 : () {
-                    setState(() {
-                      _showClientOTPLogin = true;
-                      _otpSent = false;
-                      _phoneNumberController.clear();
-                      _otpController.clear();
-                    });
-                  },
+              setState(() {
+                _showClientOTPLogin = true;
+                _otpSent = false;
+                _phoneNumberController.clear();
+                _otpController.clear();
+              });
+            },
           ),
           const SizedBox(height: 16),
           _buildMainButton(
@@ -1030,7 +1068,89 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   Widget _buildClientOTPLoginView() {
-    // Safeguard: If OTP was sent but loading is still true, reset it
+    // Show web-specific message
+    if (_isWeb) {
+      return SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            GestureDetector(
+              onTap: () {
+                setState(() {
+                  _showClientOTPLogin = false;
+                });
+              },
+              child: Row(
+                children: [
+                  Icon(Icons.arrow_back_ios, size: 18, color: Colors.grey[700]),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Back',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey[700],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 28),
+            const Text(
+              'Admin Login',
+              style: TextStyle(
+                fontSize: 26,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF1F2937),
+                letterSpacing: 0.3,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Colors.amber[50],
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.amber[200]!),
+              ),
+              child: Column(
+                children: [
+                  const Icon(Icons.info_outline, color: Colors.amber, size: 40),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'OTP Login is currently available on mobile devices only',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () {
+                        setState(() {
+                          _showClientOTPLogin = false;
+                          _showClientPasswordLogin = true;
+                        });
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF4285F4),
+                      ),
+                      child: const Text('Use Password Login Instead'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Mobile OTP view
     if (_otpSent && _isLoading) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
@@ -1038,7 +1158,7 @@ class _LoginScreenState extends State<LoginScreen>
         }
       });
     }
-    
+
     return SingleChildScrollView(
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -1052,7 +1172,7 @@ class _LoginScreenState extends State<LoginScreen>
                 _phoneNumberController.clear();
                 _otpController.clear();
                 _verificationId = null;
-                _isLoading = false; // Reset loading when going back
+                _isLoading = false;
               });
             },
             child: Row(
@@ -1151,13 +1271,13 @@ class _LoginScreenState extends State<LoginScreen>
                 onPressed: _isLoading
                     ? null
                     : () {
-                        final phone = _phoneNumberController.text.trim();
-                        if (phone.isEmpty) {
-                          _showErrorSnackBar('Please enter your phone number');
-                          return;
-                        }
-                        _sendOTP(phone);
-                      },
+                  final phone = _phoneNumberController.text.trim();
+                  if (phone.isEmpty) {
+                    _showErrorSnackBar('Please enter your phone number');
+                    return;
+                  }
+                  _sendOTP(phone);
+                },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF4285F4),
                   foregroundColor: Colors.white,
@@ -1169,21 +1289,21 @@ class _LoginScreenState extends State<LoginScreen>
                 ),
                 child: _isLoading
                     ? const SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2.5,
-                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                        ),
-                      )
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.5,
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                  ),
+                )
                     : const Text(
-                        'Send OTP',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.3,
-                        ),
-                      ),
+                  'Send OTP',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.3,
+                  ),
+                ),
               ),
             ),
             const SizedBox(height: 16),
@@ -1268,13 +1388,13 @@ class _LoginScreenState extends State<LoginScreen>
                 onPressed: _isLoading
                     ? null
                     : () {
-                        final otp = _otpController.text.trim();
-                        if (otp.length != 6) {
-                          _showErrorSnackBar('Please enter 6-digit OTP');
-                          return;
-                        }
-                        _verifyOTP(otp);
-                      },
+                  final otp = _otpController.text.trim();
+                  if (otp.length != 6) {
+                    _showErrorSnackBar('Please enter 6-digit OTP');
+                    return;
+                  }
+                  _verifyOTP(otp);
+                },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF4285F4),
                   foregroundColor: Colors.white,
@@ -1286,21 +1406,21 @@ class _LoginScreenState extends State<LoginScreen>
                 ),
                 child: _isLoading
                     ? const SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2.5,
-                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                        ),
-                      )
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.5,
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                  ),
+                )
                     : const Text(
-                        'Verify OTP',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.3,
-                        ),
-                      ),
+                  'Verify OTP',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.3,
+                  ),
+                ),
               ),
             ),
             const SizedBox(height: 16),
@@ -1547,21 +1667,21 @@ class _LoginScreenState extends State<LoginScreen>
               ),
               child: _isLoading
                   ? const SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2.5,
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                      ),
-                    )
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.5,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                ),
+              )
                   : const Text(
-                      'Sign In',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 0.3,
-                      ),
-                    ),
+                'Sign In',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.3,
+                ),
+              ),
             ),
           ),
           const SizedBox(height: 16),
@@ -1582,11 +1702,10 @@ class _LoginScreenState extends State<LoginScreen>
                   fontSize: 14,
                   color: Colors.grey[700],
                   fontWeight: FontWeight.w500,
-                      ),
-                    ),
+                ),
+              ),
             ),
           ),
-          // Add extra bottom padding to ensure button is fully visible
           SizedBox(height: MediaQuery.of(context).padding.bottom),
         ],
       ),
@@ -1617,7 +1736,7 @@ class _LoginScreenState extends State<LoginScreen>
 
               return Padding(
                 padding: EdgeInsets.only(
-                  bottom: MediaQuery.of(context).viewInsets.bottom + 
+                  bottom: MediaQuery.of(context).viewInsets.bottom +
                       MediaQuery.of(context).padding.bottom + 24,
                   left: 24,
                   right: 24,
@@ -1660,122 +1779,122 @@ class _LoginScreenState extends State<LoginScreen>
                       const SizedBox(height: 12),
                       isLoading
                           ? Container(
-                              height: 56,
-                              decoration: BoxDecoration(
-                                color: Colors.grey[100],
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border.all(
-                                  color: Colors.grey[300]!,
-                                  width: 1.5,
-                                ),
-                              ),
-                              child: const Center(
-                                child: SizedBox(
-                                  width: 24,
-                                  height: 24,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    valueColor: AlwaysStoppedAnimation<Color>(
-                                      Color(0xFF4285F4),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            )
-                          : Container(
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border.all(
-                                  color: _selectedShopId != null
-                                      ? const Color(0xFF4285F4)
-                                      : Colors.grey[300]!,
-                                  width: 2,
-                                ),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withOpacity(0.05),
-                                    blurRadius: 8,
-                                    offset: const Offset(0, 2),
-                                  ),
-                                ],
-                              ),
-                              child: DropdownButton<String>(
-                                value: _selectedShopId,
-                                isExpanded: true,
-                                underline: const SizedBox(),
-                                icon: Padding(
-                                  padding: const EdgeInsets.only(right: 12),
-                                  child: Icon(
-                                    Icons.keyboard_arrow_down,
-                                    color: Colors.grey[600],
-                                    size: 24,
-                                  ),
-                                ),
-                                hint: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                    vertical: 16,
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Icon(
-                                        Icons.store_mall_directory,
-                                        color: Colors.grey[500],
-                                        size: 22,
-                                      ),
-                                      const SizedBox(width: 14),
-                                      Text(
-                                        'Choose your shop',
-                                        style: TextStyle(
-                                          fontSize: 15,
-                                          color: Colors.grey[500],
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                items: shops.map<DropdownMenuItem<String>>((
-                                  shop,
-                                ) {
-                                  return DropdownMenuItem<String>(
-                                    value: shop['shopId'] as String,
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 16,
-                                        vertical: 14,
-                                      ),
-                                      child: Row(
-                                        children: [
-                                          Icon(
-                                            Icons.store_mall_directory,
-                                            color: const Color(0xFF4285F4),
-                                            size: 22,
-                                          ),
-                                          const SizedBox(width: 14),
-                                          Expanded(
-                                            child: Text(
-                                              shop['shopName'] as String,
-                                              style: const TextStyle(
-                                                fontSize: 15,
-                                                fontWeight: FontWeight.w700,
-                                                color: Colors.black87,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  );
-                                }).toList(),
-                                onChanged: (value) {
-                                  setModalState(() {
-                                    _selectedShopId = value;
-                                  });
-                                },
+                        height: 56,
+                        decoration: BoxDecoration(
+                          color: Colors.grey[100],
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: Colors.grey[300]!,
+                            width: 1.5,
+                          ),
+                        ),
+                        child: const Center(
+                          child: SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                Color(0xFF4285F4),
                               ),
                             ),
+                          ),
+                        ),
+                      )
+                          : Container(
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: _selectedShopId != null
+                                ? const Color(0xFF4285F4)
+                                : Colors.grey[300]!,
+                            width: 2,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.05),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: DropdownButton<String>(
+                          value: _selectedShopId,
+                          isExpanded: true,
+                          underline: const SizedBox(),
+                          icon: Padding(
+                            padding: const EdgeInsets.only(right: 12),
+                            child: Icon(
+                              Icons.keyboard_arrow_down,
+                              color: Colors.grey[600],
+                              size: 24,
+                            ),
+                          ),
+                          hint: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 16,
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.store_mall_directory,
+                                  color: Colors.grey[500],
+                                  size: 22,
+                                ),
+                                const SizedBox(width: 14),
+                                Text(
+                                  'Choose your shop',
+                                  style: TextStyle(
+                                    fontSize: 15,
+                                    color: Colors.grey[500],
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          items: shops.map<DropdownMenuItem<String>>((
+                              shop,
+                              ) {
+                            return DropdownMenuItem<String>(
+                              value: shop['shopId'] as String,
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 14,
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.store_mall_directory,
+                                      color: const Color(0xFF4285F4),
+                                      size: 22,
+                                    ),
+                                    const SizedBox(width: 14),
+                                    Expanded(
+                                      child: Text(
+                                        shop['shopName'] as String,
+                                        style: const TextStyle(
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.w700,
+                                          color: Colors.black87,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                          onChanged: (value) {
+                            setModalState(() {
+                              _selectedShopId = value;
+                            });
+                          },
+                        ),
+                      ),
                       const SizedBox(height: 24),
                       // Username Field
                       const Text(
@@ -1873,8 +1992,8 @@ class _LoginScreenState extends State<LoginScreen>
                             suffixIcon: GestureDetector(
                               onTap: () {
                                 setModalState(
-                                  () => obscureEmployeePassword =
-                                      !obscureEmployeePassword,
+                                      () => obscureEmployeePassword =
+                                  !obscureEmployeePassword,
                                 );
                               },
                               child: Icon(
@@ -1921,24 +2040,24 @@ class _LoginScreenState extends State<LoginScreen>
                           ),
                           child: _isLoading
                               ? const SizedBox(
-                                  width: 24,
-                                  height: 24,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2.5,
-                                    valueColor: AlwaysStoppedAnimation<Color>(
-                                      Colors.white,
-                                    ),
-                                  ),
-                                )
+                            width: 24,
+                            height: 24,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.5,
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                Colors.white,
+                              ),
+                            ),
+                          )
                               : const Text(
-                                  'Sign In',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w700,
-                                    color: Colors.white,
-                                    letterSpacing: 0.3,
-                                  ),
-                                ),
+                            'Sign In',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
+                              letterSpacing: 0.3,
+                            ),
+                          ),
                         ),
                       ),
                       const SizedBox(height: 24),

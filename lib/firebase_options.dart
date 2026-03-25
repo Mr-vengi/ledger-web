@@ -17,16 +17,19 @@ import 'package:flutter/foundation.dart'
 class DefaultFirebaseOptions {
   static FirebaseOptions get currentPlatform {
     if (kIsWeb) {
-      throw UnsupportedError(
-        'DefaultFirebaseOptions have not been configured for web - '
-        'you can reconfigure this by running the FlutterFire CLI again.',
-      );
+      return web;
     }
     switch (defaultTargetPlatform) {
       case TargetPlatform.android:
-        return android;
+        throw UnsupportedError(
+          'DefaultFirebaseOptions have not been configured for android - '
+          'you can reconfigure this by running the FlutterFire CLI again.',
+        );
       case TargetPlatform.iOS:
-        return ios;
+        throw UnsupportedError(
+          'DefaultFirebaseOptions have not been configured for ios - '
+          'you can reconfigure this by running the FlutterFire CLI again.',
+        );
       case TargetPlatform.macOS:
         throw UnsupportedError(
           'DefaultFirebaseOptions have not been configured for macos - '
@@ -49,21 +52,13 @@ class DefaultFirebaseOptions {
     }
   }
 
-  static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyB2Nsx12qHZ3aUyeNuxVu3Uhj7w9viWous',
-    appId: '1:582085220530:android:7e757a07aa07b6be4091ab',
-    messagingSenderId: '582085220530',
-    projectId: 'ledger-prod-17fa0',
-    storageBucket: 'ledger-prod-17fa0.firebasestorage.app',
+  static const FirebaseOptions web = FirebaseOptions(
+    apiKey: 'AIzaSyANqRp7NeGEXkNUTOuDy46Bjes_-LDaeU4',
+    appId: '1:1021995791503:web:051c893be46421849c2cfa',
+    messagingSenderId: '1021995791503',
+    projectId: 'ledger-72910',
+    authDomain: 'ledger-72910.firebaseapp.com',
+    storageBucket: 'ledger-72910.firebasestorage.app',
+    measurementId: 'G-61X5DN3V5B',
   );
-
-  static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyCf_jjFk3PWT3x1RH0deQxRwufvGt0mtV4',
-    appId: '1:582085220530:ios:c2f96a90aaf32ad94091ab',
-    messagingSenderId: '582085220530',
-    projectId: 'ledger-prod-17fa0',
-    storageBucket: 'ledger-prod-17fa0.firebasestorage.app',
-    iosBundleId: 'com.ledger.ledger',
-  );
-
 }

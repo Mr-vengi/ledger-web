@@ -3,10 +3,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
-import 'package:path_provider/path_provider.dart';
-import 'package:open_file/open_file.dart';
 import 'package:share_plus/share_plus.dart';
-import 'dart:io';
+import 'dart:typed_data';
+import 'dart:html' as html;
 
 class ExportCustomerPage extends StatefulWidget {
   const ExportCustomerPage({super.key});
@@ -21,7 +20,7 @@ class _ExportCustomerPageState extends State<ExportCustomerPage> {
   String? _selectedCustomer;
   bool _isLoading = false;
   List<Map<String, dynamic>> _customers = [];
-  String? _lastExportedFilePath;
+  String? _lastExportedFileName;
 
   @override
   void initState() {
@@ -42,7 +41,7 @@ class _ExportCustomerPageState extends State<ExportCustomerPage> {
       }).toList();
 
       customerList.sort(
-        (a, b) => (a['name'] as String).compareTo(b['name'] as String),
+            (a, b) => (a['name'] as String).compareTo(b['name'] as String),
       );
 
       setState(() {
@@ -92,11 +91,13 @@ class _ExportCustomerPageState extends State<ExportCustomerPage> {
     }
   }
 
-  /// Generate PDF Report
-  Future<String> _generatePDF(String reportType) async {
+  /// Generate PDF Report (Web Only)
+  Future<Uint8List> _generatePDF(String reportType) async {
     final pdf = pw.Document();
     final dateRange =
         '${DateFormat('dd-MMM-yyyy').format(_fromDate)} to ${DateFormat('dd-MMM-yyyy').format(_toDate)}';
+
+    final String customerName = _selectedCustomer ?? "All Customers";
 
     pdf.addPage(
       pw.Page(
@@ -129,7 +130,7 @@ class _ExportCustomerPageState extends State<ExportCustomerPage> {
                       ),
                     ),
                     pw.Text(
-                      'Customer: ${_selectedCustomer ?? "All Customers"}',
+                      'Customer: $customerName',
                       style: const pw.TextStyle(
                         fontSize: 12,
                         color: PdfColors.white,
@@ -298,26 +299,20 @@ class _ExportCustomerPageState extends State<ExportCustomerPage> {
       ),
     );
 
-    // Save PDF
-    final output = await getTemporaryDirectory();
-    final fileName =
-        '${reportType.replaceAll(' ', '_')}_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.pdf';
-    final file = File('${output.path}/$fileName');
-    await file.writeAsBytes(await pdf.save());
-
-    return file.path;
+    return await pdf.save();
   }
 
-  /// Generate Excel (CSV format for simplicity)
-  Future<String> _generateExcel(String reportType) async {
+  /// Generate Excel (CSV format for web)
+  Future<Uint8List> _generateExcel(String reportType) async {
     final dateRange =
         '${DateFormat('dd-MMM-yyyy').format(_fromDate)} to ${DateFormat('dd-MMM-yyyy').format(_toDate)}';
+    final String customerName = _selectedCustomer ?? "All Customers";
 
     // CSV Content
     final csvContent = StringBuffer();
     csvContent.writeln('$reportType');
     csvContent.writeln('Period: $dateRange');
-    csvContent.writeln('Customer: ${_selectedCustomer ?? "All Customers"}');
+    csvContent.writeln('Customer: $customerName');
     csvContent.writeln(
       'Generated: ${DateFormat('dd-MMM-yyyy hh:mm a').format(DateTime.now())}',
     );
@@ -335,17 +330,20 @@ class _ExportCustomerPageState extends State<ExportCustomerPage> {
     csvContent.writeln('');
     csvContent.writeln('Total,,15000');
 
-    // Save Excel (CSV)
-    final output = await getTemporaryDirectory();
-    final fileName =
-        '${reportType.replaceAll(' ', '_')}_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.csv';
-    final file = File('${output.path}/$fileName');
-    await file.writeAsString(csvContent.toString());
-
-    return file.path;
+    return Uint8List.fromList(csvContent.toString().codeUnits);
   }
 
-  /// Show success dialog with Open and Share options
+  /// Trigger file download in browser
+  void _downloadFile(Uint8List bytes, String fileName, String mimeType) {
+    final blob = html.Blob([bytes], mimeType);
+    final url = html.Url.createObjectUrlFromBlob(blob);
+    final anchor = html.AnchorElement(href: url)
+      ..setAttribute('download', fileName)
+      ..click();
+    html.Url.revokeObjectUrl(url);
+  }
+
+  /// Show success dialog for web
   void _showExportSuccessDialog(String reportType, String format) {
     showDialog(
       context: context,
@@ -389,91 +387,61 @@ class _ExportCustomerPageState extends State<ExportCustomerPage> {
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 14, color: Colors.grey[600]),
               ),
+              const SizedBox(height: 12),
+
+              Text(
+                'File: $_lastExportedFileName',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+              ),
               const SizedBox(height: 24),
 
-              // Action Buttons
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () async {
-                        Navigator.pop(context);
-                        if (_lastExportedFilePath != null) {
-                          final result = await OpenFile.open(
-                            _lastExportedFilePath,
-                          );
-                          if (result.type != ResultType.done) {
-                            if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(
-                                    'Could not open file: ${result.message}',
-                                  ),
-                                  backgroundColor: Colors.orange[600],
-                                  behavior: SnackBarBehavior.floating,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
+              // Share Button (Web Share API)
+              if (html.window.navigator.share != null)
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () async {
+                      Navigator.pop(context);
+                      if (_lastExportedFileName != null) {
+                        try {
+                          // For web, we need to create a File object to share
+                          // This is limited, but we can use the share API with URL
+                          await html.window.navigator.share({
+                            'title': '$reportType Report',
+                            'text': 'Check out this $reportType report',
+                          });
+                        } catch (e) {
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Could not share: $e'),
+                                backgroundColor: Colors.orange[600],
+                                behavior: SnackBarBehavior.floating,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10),
                                 ),
-                              );
-                            }
+                              ),
+                            );
                           }
                         }
-                      },
-                      icon: const Icon(Icons.open_in_new, size: 20),
-                      label: const Text('Open'),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        side: const BorderSide(color: Color(0xFF4285F4)),
-                        foregroundColor: const Color(0xFF4285F4),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
+                      }
+                    },
+                    icon: const Icon(Icons.share, size: 20),
+                    label: const Text('Share'),
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      backgroundColor: const Color(0xFF4285F4),
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
                       ),
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: () async {
-                        Navigator.pop(context);
-                        if (_lastExportedFilePath != null) {
-                          try {
-                            final xFile = XFile(_lastExportedFilePath!);
-                            await Share.shareXFiles([
-                              xFile,
-                            ], text: '$reportType - $format');
-                          } catch (e) {
-                            if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text('Could not share file: $e'),
-                                  backgroundColor: Colors.orange[600],
-                                  behavior: SnackBarBehavior.floating,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                ),
-                              );
-                            }
-                          }
-                        }
-                      },
-                      icon: const Icon(Icons.share, size: 20),
-                      label: const Text('Share'),
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        backgroundColor: const Color(0xFF4285F4),
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
+                ),
+
+              if (html.window.navigator.share != null)
+                const SizedBox(height: 12),
 
               // Close Button
               TextButton(
@@ -494,20 +462,29 @@ class _ExportCustomerPageState extends State<ExportCustomerPage> {
     setState(() => _isLoading = true);
 
     try {
-      String filePath;
+      Uint8List fileBytes;
+      String fileName;
+      String mimeType;
 
       if (format == 'PDF') {
-        filePath = await _generatePDF(reportType);
+        fileBytes = await _generatePDF(reportType);
+        fileName = '${reportType.replaceAll(' ', '_')}_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.pdf';
+        mimeType = 'application/pdf';
       } else {
-        filePath = await _generateExcel(reportType);
+        fileBytes = await _generateExcel(reportType);
+        fileName = '${reportType.replaceAll(' ', '_')}_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.csv';
+        mimeType = 'text/csv';
       }
 
       setState(() {
         _isLoading = false;
-        _lastExportedFilePath = filePath;
+        _lastExportedFileName = fileName;
       });
 
-      // Show success dialog with open/share options
+      // Download the file
+      _downloadFile(fileBytes, fileName, mimeType);
+
+      // Show success dialog
       _showExportSuccessDialog(reportType, format);
     } catch (e) {
       setState(() => _isLoading = false);
@@ -876,7 +853,7 @@ class _ExportCustomerPageState extends State<ExportCustomerPage> {
                 icon: Icons.receipt_long,
                 title: 'Customer Statement',
                 description:
-                    'Individual transaction history with opening and closing balance',
+                'Individual transaction history with opening and closing balance',
                 iconColor: const Color(0xFF4285F4),
                 exportOptions: [
                   {
@@ -897,7 +874,7 @@ class _ExportCustomerPageState extends State<ExportCustomerPage> {
                 icon: Icons.analytics,
                 title: 'Outstanding Summary',
                 description:
-                    'All customers with current outstanding amounts and status',
+                'All customers with current outstanding amounts and status',
                 iconColor: const Color(0xFFFF9800),
                 exportOptions: [
                   {
@@ -918,7 +895,7 @@ class _ExportCustomerPageState extends State<ExportCustomerPage> {
                 icon: Icons.payment,
                 title: 'Collection Report',
                 description:
-                    'Daily and monthly payment collections with totals',
+                'Daily and monthly payment collections with totals',
                 iconColor: const Color(0xFF4CAF50),
                 exportOptions: [
                   {
@@ -963,9 +940,10 @@ class _ExportCustomerPageState extends State<ExportCustomerPage> {
                           const SizedBox(height: 6),
                           Text(
                             '• PDF for printing and sharing\n'
-                            '• Excel for data analysis\n'
-                            '• Date range applies to all reports\n'
-                            '• Select specific or all customers',
+                                '• Excel for data analysis\n'
+                                '• Date range applies to all reports\n'
+                                '• Select specific or all customers\n'
+                                '• Files download automatically to your browser',
                             style: TextStyle(
                               fontSize: 12,
                               color: Colors.blue[800],

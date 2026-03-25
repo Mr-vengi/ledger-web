@@ -2,11 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:http/http.dart' as http;
-import 'dart:io';
 import 'dart:typed_data';
-import 'package:path_provider/path_provider.dart';
-import 'package:open_file/open_file.dart';
+import 'dart:async';
 import 'package:share_plus/share_plus.dart';
+import 'dart:html' as html;
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 class AnalyticsPage extends StatefulWidget {
   const AnalyticsPage({super.key});
@@ -30,7 +30,7 @@ class _AnalyticsPageState extends State<AnalyticsPage>
   List<Map<String, dynamic>> _recentTransactions = [];
   List<Map<String, dynamic>> _dailyBalances = [];
   List<Map<String, dynamic>> _topCustomers = [];
-  
+
   // Bills Data
   List<Map<String, dynamic>> _allBills = [];
   DateTime? _selectedStartDate;
@@ -67,7 +67,7 @@ class _AnalyticsPageState extends State<AnalyticsPage>
       for (var doc in snapshot.docs) {
         final data = doc.data() as Map<String, dynamic>?;
         if (data == null) continue;
-        
+
         final collectionName = data['collectionName'] ?? '';
 
         // ✅ Fetch shop name from the actual shop collection's Credentials document
@@ -161,7 +161,7 @@ class _AnalyticsPageState extends State<AnalyticsPage>
       for (var doc in datesSnapshot.docs) {
         final data = doc.data() as Map<String, dynamic>?;
         if (data == null) continue;
-        
+
         final closingBalance = (data['closingBalance'] ?? 0).toDouble();
         final openingBalance = (data['openingBalance'] ?? 0).toDouble();
         final status = data['status'] ?? '';
@@ -227,7 +227,7 @@ class _AnalyticsPageState extends State<AnalyticsPage>
       for (var doc in customerSnapshot.docs) {
         final data = doc.data() as Map<String, dynamic>?;
         if (data == null) continue;
-        
+
         final customerType = data['customerType'] ?? '';
         final openingAmount = (data['openingAmount'] ?? 0).toDouble();
         final customerName = data['customerName'] ?? 'Unknown';
@@ -248,7 +248,7 @@ class _AnalyticsPageState extends State<AnalyticsPage>
       }
 
       customers.sort(
-        (a, b) => (b['openingAmount'] as double).compareTo(
+            (a, b) => (b['openingAmount'] as double).compareTo(
           a['openingAmount'] as double,
         ),
       );
@@ -298,7 +298,7 @@ class _AnalyticsPageState extends State<AnalyticsPage>
       for (var doc in transactionSnapshot.docs) {
         final data = doc.data() as Map<String, dynamic>?;
         if (data == null) continue;
-        
+
         final amount = (data['amount'] ?? 0).toDouble();
         final isCredit = data['isCredit'] ?? false;
         final createdAt = (data['createdAt'] as Timestamp?)?.toDate();
@@ -370,7 +370,7 @@ class _AnalyticsPageState extends State<AnalyticsPage>
       for (var doc in transactionSnapshot.docs) {
         final data = doc.data() as Map<String, dynamic>?;
         if (data == null) continue;
-        
+
         transactions.add({
           'id': doc.id,
           'amount': data['amount'] ?? 0,
@@ -406,7 +406,7 @@ class _AnalyticsPageState extends State<AnalyticsPage>
       for (var doc in datesSnapshot.docs) {
         final data = doc.data() as Map<String, dynamic>?;
         if (data == null) continue;
-        
+
         balances.add({
           'date': data['ledgerDate'] ?? doc.id,
           'opening': data['openingBalance'] ?? 0,
@@ -463,7 +463,7 @@ class _AnalyticsPageState extends State<AnalyticsPage>
       for (var doc in snapshot.docs) {
         final data = doc.data() as Map<String, dynamic>?;
         if (data == null) continue;
-        
+
         final billPhotoUrl = data['billPhotoUrl'] as String?;
 
         if (billPhotoUrl != null && billPhotoUrl.isNotEmpty) {
@@ -625,7 +625,7 @@ class _AnalyticsPageState extends State<AnalyticsPage>
                 setState(() {
                   _selectedShopId = value;
                   _selectedShopName = _availableShops.firstWhere(
-                    (shop) => shop['id'] == value,
+                        (shop) => shop['id'] == value,
                   )['name']!;
                 });
                 _loadAnalyticsData();
@@ -658,7 +658,7 @@ class _AnalyticsPageState extends State<AnalyticsPage>
           label: 'Active Ledger Days',
           value: '${_ledgerStats['totalDays'] ?? 0}',
           subtitle:
-              '${_ledgerStats['openLedgers'] ?? 0} open, ${_ledgerStats['closedLedgers'] ?? 0} closed',
+          '${_ledgerStats['openLedgers'] ?? 0} open, ${_ledgerStats['closedLedgers'] ?? 0} closed',
         ),
         const SizedBox(height: 16),
       ],
@@ -683,7 +683,7 @@ class _AnalyticsPageState extends State<AnalyticsPage>
         _buildMetricCard(
           label: 'Retail vs Wholesale',
           value:
-              '${_customerStats['retailCustomers'] ?? 0} : ${_customerStats['wholesaleCustomers'] ?? 0}',
+          '${_customerStats['retailCustomers'] ?? 0} : ${_customerStats['wholesaleCustomers'] ?? 0}',
           subtitle: 'Retail to wholesale ratio',
         ),
         const SizedBox(height: 8),
@@ -798,7 +798,7 @@ class _AnalyticsPageState extends State<AnalyticsPage>
           label: 'This Month Credits',
           value: _formatCurrency((_transactionStats['monthCredit'] ?? 0).toDouble()),
           subtitle:
-              '${_transactionStats['monthTransactions'] ?? 0} transactions',
+          '${_transactionStats['monthTransactions'] ?? 0} transactions',
         ),
         const SizedBox(height: 8),
         _buildMetricCard(
@@ -941,7 +941,7 @@ class _AnalyticsPageState extends State<AnalyticsPage>
         _buildMetricCard(
           label: 'Transaction Types',
           value:
-              '${(_transactionStats['transactionTypes'] as Map<String, int>?)?.length ?? 0}',
+          '${(_transactionStats['transactionTypes'] as Map<String, int>?)?.length ?? 0}',
           subtitle: 'Different transaction categories',
         ),
         const SizedBox(height: 16),
@@ -1120,7 +1120,7 @@ class _AnalyticsPageState extends State<AnalyticsPage>
                               child: Text(
                                 _selectedStartDate != null
                                     ? DateFormat('dd-MMM-yyyy')
-                                        .format(_selectedStartDate!)
+                                    .format(_selectedStartDate!)
                                     : 'Start Date',
                                 style: TextStyle(
                                   fontSize: 13,
@@ -1167,7 +1167,7 @@ class _AnalyticsPageState extends State<AnalyticsPage>
                               child: Text(
                                 _selectedEndDate != null
                                     ? DateFormat('dd-MMM-yyyy')
-                                        .format(_selectedEndDate!)
+                                    .format(_selectedEndDate!)
                                     : 'End Date',
                                 style: TextStyle(
                                   fontSize: 13,
@@ -1191,76 +1191,76 @@ class _AnalyticsPageState extends State<AnalyticsPage>
         Expanded(
           child: _isLoadingBills
               ? const Center(
-                  child: CircularProgressIndicator(color: Color(0xFF1976D2)),
-                )
+            child: CircularProgressIndicator(color: Color(0xFF1976D2)),
+          )
               : _allBills.isEmpty
-                  ? Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.receipt_long,
-                              size: 64, color: Colors.grey[400]),
-                          const SizedBox(height: 16),
-                          Text(
-                            'No bills found',
-                            style: TextStyle(
-                              fontSize: 16,
-                              color: Colors.grey[600],
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            _selectedStartDate != null || _selectedEndDate != null
-                                ? 'Try adjusting your date filter'
-                                : 'Bills will appear here when transactions have photos',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: Colors.grey[500],
-                            ),
-                            textAlign: TextAlign.center,
-                          ),
-                        ],
-                      ),
-                    )
-                  : NotificationListener<ScrollNotification>(
-                      onNotification: (ScrollNotification scrollInfo) {
-                        if (!_isLoadingBills &&
-                            _hasMoreBills &&
-                            scrollInfo.metrics.pixels >=
-                                scrollInfo.metrics.maxScrollExtent - 200) {
-                          // Load more when scrolled near bottom (200px threshold)
-                          _loadBills(loadMore: true);
-                        }
-                        return false;
-                      },
-                      child: GridView.builder(
-                        padding: const EdgeInsets.all(16),
-                        gridDelegate:
-                            const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
-                          crossAxisSpacing: 12,
-                          mainAxisSpacing: 12,
-                          childAspectRatio: 0.75,
-                        ),
-                        itemCount: _allBills.length + (_hasMoreBills ? 1 : 0),
-                        itemBuilder: (context, index) {
-                          // Show loading indicator at the end if more bills available
-                          if (index == _allBills.length) {
-                            return const Center(
-                              child: Padding(
-                                padding: EdgeInsets.all(16.0),
-                                child: CircularProgressIndicator(
-                                  color: Color(0xFF1976D2),
-                                ),
-                              ),
-                            );
-                          }
-                          final bill = _allBills[index];
-                          return _buildBillCard(bill);
-                        },
+              ? Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.receipt_long,
+                    size: 64, color: Colors.grey[400]),
+                const SizedBox(height: 16),
+                Text(
+                  'No bills found',
+                  style: TextStyle(
+                    fontSize: 16,
+                    color: Colors.grey[600],
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _selectedStartDate != null || _selectedEndDate != null
+                      ? 'Try adjusting your date filter'
+                      : 'Bills will appear here when transactions have photos',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Colors.grey[500],
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          )
+              : NotificationListener<ScrollNotification>(
+            onNotification: (ScrollNotification scrollInfo) {
+              if (!_isLoadingBills &&
+                  _hasMoreBills &&
+                  scrollInfo.metrics.pixels >=
+                      scrollInfo.metrics.maxScrollExtent - 200) {
+                // Load more when scrolled near bottom (200px threshold)
+                _loadBills(loadMore: true);
+              }
+              return false;
+            },
+            child: GridView.builder(
+              padding: const EdgeInsets.all(16),
+              gridDelegate:
+              const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                crossAxisSpacing: 12,
+                mainAxisSpacing: 12,
+                childAspectRatio: 0.75,
+              ),
+              itemCount: _allBills.length + (_hasMoreBills ? 1 : 0),
+              itemBuilder: (context, index) {
+                // Show loading indicator at the end if more bills available
+                if (index == _allBills.length) {
+                  return const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(16.0),
+                      child: CircularProgressIndicator(
+                        color: Color(0xFF1976D2),
                       ),
                     ),
+                  );
+                }
+                final bill = _allBills[index];
+                return _buildBillCard(bill);
+              },
+            ),
+          ),
         ),
       ],
     );
@@ -1326,7 +1326,7 @@ class _AnalyticsPageState extends State<AnalyticsPage>
                           child: CircularProgressIndicator(
                             value: loadingProgress.expectedTotalBytes != null
                                 ? loadingProgress.cumulativeBytesLoaded /
-                                    loadingProgress.expectedTotalBytes!
+                                loadingProgress.expectedTotalBytes!
                                 : null,
                             strokeWidth: 2,
                           ),
@@ -1408,7 +1408,7 @@ class _AnalyticsPageState extends State<AnalyticsPage>
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => _BillViewerBottomSheet(
+      builder: (context) => BillViewerBottomSheet(
         billPhotoUrl: billPhotoUrl,
         transactionTitle: ledgerName,
         amount: amount,
@@ -1504,13 +1504,14 @@ class _AnalyticsPageState extends State<AnalyticsPage>
 }
 
 // Bill Viewer Bottom Sheet
-class _BillViewerBottomSheet extends StatefulWidget {
+class BillViewerBottomSheet extends StatefulWidget {
   final String billPhotoUrl;
   final String transactionTitle;
   final double amount;
   final DateTime? createdAt;
 
-  const _BillViewerBottomSheet({
+  const BillViewerBottomSheet({
+    super.key,
     required this.billPhotoUrl,
     required this.transactionTitle,
     required this.amount,
@@ -1518,12 +1519,12 @@ class _BillViewerBottomSheet extends StatefulWidget {
   });
 
   @override
-  State<_BillViewerBottomSheet> createState() => _BillViewerBottomSheetState();
+  State<BillViewerBottomSheet> createState() => _BillViewerBottomSheetState();
 }
 
-class _BillViewerBottomSheetState extends State<_BillViewerBottomSheet> {
+class _BillViewerBottomSheetState extends State<BillViewerBottomSheet> {
   final TransformationController _transformationController =
-      TransformationController();
+  TransformationController();
   bool _isDownloading = false;
 
   @override
@@ -1540,26 +1541,24 @@ class _BillViewerBottomSheetState extends State<_BillViewerBottomSheet> {
       if (response.statusCode == 200) {
         final Uint8List imageBytes = response.bodyBytes;
 
-        final directory = await getApplicationDocumentsDirectory();
-        final timestamp = DateTime.now().millisecondsSinceEpoch;
-        final fileName =
-            'bill_${widget.transactionTitle.replaceAll(' ', '_')}_$timestamp.jpg';
-        final filePath = '${directory.path}/$fileName';
-
-        final file = File(filePath);
-        await file.writeAsBytes(imageBytes);
+        // Create blob and trigger download
+        final blob = html.Blob([imageBytes], 'image/jpeg');
+        final url = html.Url.createObjectUrlFromBlob(blob);
+        final anchor = html.AnchorElement(href: url)
+          ..setAttribute('download', 'bill_${DateTime.now().millisecondsSinceEpoch}.jpg')
+          ..click();
+        html.Url.revokeObjectUrl(url);
 
         setState(() => _isDownloading = false);
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Bill downloaded to $fileName'),
+            const SnackBar(
+              content: Text('Bill downloaded successfully'),
               backgroundColor: Colors.green,
-              duration: const Duration(seconds: 2),
+              duration: Duration(seconds: 2),
             ),
           );
-          await OpenFile.open(filePath);
         }
       } else {
         throw Exception('Failed to download image');
@@ -1585,22 +1584,45 @@ class _BillViewerBottomSheetState extends State<_BillViewerBottomSheet> {
       if (response.statusCode == 200) {
         final Uint8List imageBytes = response.bodyBytes;
 
-        final directory = await getTemporaryDirectory();
-        final timestamp = DateTime.now().millisecondsSinceEpoch;
-        final fileName = 'bill_$timestamp.jpg';
-        final filePath = '${directory.path}/$fileName';
+        // Create a blob for sharing
+        final blob = html.Blob([imageBytes], 'image/jpeg');
 
-        final file = File(filePath);
-        await file.writeAsBytes(imageBytes);
+        // Check if Web Share API is available
+        if (html.window.navigator.share != null) {
+          try {
+            // Create a File object
+            final file = html.File([blob], 'bill_${widget.transactionTitle.replaceAll(' ', '_')}.jpg',
+                {'type': 'image/jpeg'});
+
+            // For sharing files, we need to use the share method with files property
+            await html.window.navigator.share({
+              'title': 'Bill',
+              'text': 'Bill for ${widget.transactionTitle}',
+              'files': [file]
+            });
+
+            setState(() => _isDownloading = false);
+
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Bill shared successfully'),
+                  backgroundColor: Colors.green,
+                  duration: Duration(seconds: 2),
+                ),
+              );
+            }
+            return;
+          } catch (e) {
+            debugPrint('Web Share API with files failed: $e');
+            // Fall through to download method
+          }
+        }
+
+        // Fallback: Download the file
+        _downloadBill();
 
         setState(() => _isDownloading = false);
-
-        if (mounted) {
-          await Share.shareXFiles(
-            [XFile(filePath)],
-            text: 'Bill for ${widget.transactionTitle}',
-          );
-        }
       } else {
         throw Exception('Failed to download image');
       }
@@ -1737,14 +1759,14 @@ class _BillViewerBottomSheetState extends State<_BillViewerBottomSheet> {
                         onPressed: _isDownloading ? null : _downloadBill,
                         icon: _isDownloading
                             ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  valueColor:
-                                      AlwaysStoppedAnimation<Color>(Colors.white),
-                                ),
-                              )
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor:
+                            AlwaysStoppedAnimation<Color>(Colors.white),
+                          ),
+                        )
                             : const Icon(Icons.download, size: 18),
                         label: const Text('Download'),
                         style: ElevatedButton.styleFrom(

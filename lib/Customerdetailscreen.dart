@@ -5,25 +5,22 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
-import 'package:path_provider/path_provider.dart';
-import 'dart:io';
-import 'package:open_file/open_file.dart';
-import 'package:excel/excel.dart' as excel;
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:typed_data';
+import 'dart:html' as html;
 import 'balance_details_screen.dart';
 
 class CustomerDetailScreen extends StatefulWidget {
   final String customerId;
   final String customerName;
-  final String? shopCollection; // ✅ ADD THIS LINE
+  final String? shopCollection;
 
   const CustomerDetailScreen({
     super.key,
     required this.customerId,
     required this.customerName,
-    this.shopCollection, // ✅ ADD THIS LINE
+    this.shopCollection,
   });
 
   @override
@@ -43,8 +40,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
 
   Future<void> _initializeShop() async {
     try {
-      String? shopCollection =
-          widget.shopCollection; // ✅ Use widget.shopCollection
+      String? shopCollection = widget.shopCollection;
       print('DEBUG: Initial shopCollection from widget: $shopCollection');
 
       // If not passed, try to get from SharedPreferences
@@ -298,14 +294,14 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   }
 
   Widget _buildDownloadOption(
-    BuildContext context, {
-    required IconData icon,
-    required Color iconColor,
-    required String title,
-    required String subtitle,
-    required VoidCallback onTap,
-    required bool isLandscape,
-  }) {
+      BuildContext context, {
+        required IconData icon,
+        required Color iconColor,
+        required String title,
+        required String subtitle,
+        required VoidCallback onTap,
+        required bool isLandscape,
+      }) {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
@@ -361,7 +357,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
     );
   }
 
-  /// 🔹 Download as PDF (Optimized)
+  /// 🔹 Download as PDF (Web Only)
   Future<void> _downloadAsPDF(List<QueryDocumentSnapshot> docs) async {
     setState(() => _isDownloading = true);
 
@@ -372,8 +368,6 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
       final mobile = customerData['mobile'] as String;
 
       // Calculate transactions and balance
-      // Payment IN = DEBIT (isCredit = false) → money received from customer → REDUCE balance (subtract)
-      // Payment OUT = CREDIT (isCredit = true) → money given to customer → INCREASE balance (add)
       double runningBalance = openingAmount;
       final transactions = <Map<String, dynamic>>[];
 
@@ -383,9 +377,9 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         final isCredit = data['isCredit'] ?? false;
 
         if (isCredit) {
-          runningBalance += amount; // Payment OUT increases what customer owes
+          runningBalance += amount;
         } else {
-          runningBalance -= amount; // Payment IN reduces what customer owes
+          runningBalance -= amount;
         }
 
         transactions.add({...data, 'balance': runningBalance});
@@ -504,8 +498,6 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                             data['description'] ?? 'No description',
                           ),
                           _buildTableCell(
-                            // Payment IN = DEBIT (isCredit = false) → "Payment In"
-                            // Payment OUT = CREDIT (isCredit = true) → "Payment Out"
                             isCredit ? 'Payment Out' : 'Payment In',
                           ),
                           _buildTableCell('Rs. ${_formatAmount(amount)}'),
@@ -560,17 +552,23 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         ),
       );
 
-      // Save and open PDF
-      final output = await getApplicationDocumentsDirectory();
-      final fileName =
-          '${widget.customerName.replaceAll(' ', '_')}_transactions_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.pdf';
-      final file = File('${output.path}/$fileName');
-      await file.writeAsBytes(await pdf.save());
+      final pdfBytes = await pdf.save();
+
+      // Web: Trigger download via HTML anchor
+      final blob = html.Blob([pdfBytes], 'application/pdf');
+      final url = html.Url.createObjectUrlFromBlob(blob);
+      final anchor = html.AnchorElement(href: url)
+        ..setAttribute(
+          'download',
+          '${widget.customerName.replaceAll(' ', '_')}_transactions_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.pdf',
+        )
+        ..click();
+      html.Url.revokeObjectUrl(url);
 
       setState(() => _isDownloading = false);
 
       if (mounted) {
-        _showSuccessDialog('PDF', file.path);
+        _showSuccessDialog('PDF');
       }
     } catch (e) {
       setState(() => _isDownloading = false);
@@ -586,7 +584,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
     }
   }
 
-  /// 🔹 Download as Excel (Optimized)
+  /// 🔹 Download as Excel (Web Only)
   Future<void> _downloadAsExcel(List<QueryDocumentSnapshot> docs) async {
     setState(() => _isDownloading = true);
 
@@ -596,116 +594,52 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
       final openingAmount = customerData['openingAmount'] as double;
       final mobile = customerData['mobile'] as String;
 
-      var excelFile = excel.Excel.createExcel();
-      excel.Sheet sheetObject = excelFile['Transactions'];
+      // Create HTML table content for Excel
+      final StringBuffer htmlContent = StringBuffer();
 
-      // Set column widths
-      sheetObject.setColumnWidth(0, 15);
-      sheetObject.setColumnWidth(1, 12);
-      sheetObject.setColumnWidth(2, 30);
-      sheetObject.setColumnWidth(3, 15);
-      sheetObject.setColumnWidth(4, 15);
-      sheetObject.setColumnWidth(5, 15);
+      htmlContent.writeln('<html>');
+      htmlContent.writeln('<head>');
+      htmlContent.writeln('<meta charset="UTF-8">');
+      htmlContent.writeln('<title>Customer Transaction Report</title>');
+      htmlContent.writeln('</head>');
+      htmlContent.writeln('<body>');
 
-      // Add title
-      sheetObject.merge(
-        excel.CellIndex.indexByString('A1'),
-        excel.CellIndex.indexByString('F1'),
-      );
-      var titleCell = sheetObject.cell(excel.CellIndex.indexByString('A1'));
-      titleCell.value = excel.TextCellValue(
-        'Customer Transaction Report - ${widget.customerName}',
-      );
-      titleCell.cellStyle = excel.CellStyle(
-        bold: true,
-        fontSize: 16,
-        horizontalAlign: excel.HorizontalAlign.Center,
-        backgroundColorHex: excel.ExcelColor.blue,
-        fontColorHex: excel.ExcelColor.white,
+      // Title
+      htmlContent.writeln(
+        '<h2>Customer Transaction Report - ${widget.customerName}</h2>',
       );
 
-      // Add customer info
-      int row = 2;
-      sheetObject
-          .cell(excel.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row))
-          .value = excel.TextCellValue(
-        'Customer:',
+      // Customer Info
+      htmlContent.writeln('<table border="1" cellpadding="5" cellspacing="0">');
+      htmlContent.writeln(
+        '<tr><td><b>Customer:</b></td><td>${widget.customerName}</td></tr>',
       );
-      sheetObject
-          .cell(excel.CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: row))
-          .value = excel.TextCellValue(
-        widget.customerName,
+      htmlContent.writeln('<tr><td><b>Mobile:</b></td><td>$mobile</td></tr>');
+      htmlContent.writeln(
+        '<tr><td><b>Generated:</b></td><td>${DateFormat('dd-MMM-yyyy HH:mm').format(DateTime.now())}</td></tr>',
       );
+      htmlContent.writeln(
+        '<tr><td><b>Opening Balance:</b></td><td>₹${_formatAmount(openingAmount)}</td></tr>',
+      );
+      htmlContent.writeln('</table>');
 
-      row++;
-      sheetObject
-          .cell(excel.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row))
-          .value = excel.TextCellValue(
-        'Mobile:',
-      );
-      sheetObject
-          .cell(excel.CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: row))
-          .value = excel.TextCellValue(
-        mobile,
-      );
+      htmlContent.writeln('<br/>');
 
-      row++;
-      sheetObject
-          .cell(excel.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row))
-          .value = excel.TextCellValue(
-        'Generated:',
+      // Transactions Table
+      htmlContent.writeln('<table border="1" cellpadding="5" cellspacing="0">');
+      htmlContent.writeln(
+        '<tr style="background-color: #4285F4; color: white;">',
       );
-      sheetObject
-          .cell(excel.CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: row))
-          .value = excel.TextCellValue(
-        DateFormat('dd-MMM-yyyy HH:mm').format(DateTime.now()),
-      );
+      htmlContent.writeln('<th>Date</th>');
+      htmlContent.writeln('<th>Time</th>');
+      htmlContent.writeln('<th>Description</th>');
+      htmlContent.writeln('<th>Type</th>');
+      htmlContent.writeln('<th>Amount</th>');
+      htmlContent.writeln('<th>Balance</th>');
+      htmlContent.writeln('</tr>');
 
-      // Add opening balance
-      row += 2;
-      sheetObject
-          .cell(excel.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row))
-          .value = excel.TextCellValue(
-        'Opening Balance:',
-      );
-      var openingCell = sheetObject.cell(
-        excel.CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: row),
-      );
-      openingCell.value = excel.DoubleCellValue(openingAmount);
-      openingCell.cellStyle = excel.CellStyle(
-        bold: true,
-        fontColorHex: excel.ExcelColor.red,
-      );
-
-      // Add table headers
-      row += 2;
-      final headers = [
-        'Date',
-        'Time',
-        'Description',
-        'Type',
-        'Amount',
-        'Balance',
-      ];
-      for (int i = 0; i < headers.length; i++) {
-        var cell = sheetObject.cell(
-          excel.CellIndex.indexByColumnRow(columnIndex: i, rowIndex: row),
-        );
-        cell.value = excel.TextCellValue(headers[i]);
-        cell.cellStyle = excel.CellStyle(
-          bold: true,
-          backgroundColorHex: excel.ExcelColor.blue,
-          fontColorHex: excel.ExcelColor.white,
-          horizontalAlign: excel.HorizontalAlign.Center,
-        );
-      }
-
-      // Add transaction data
-      // Payment IN = DEBIT (isCredit = false) → money received from customer → REDUCE balance (subtract)
-      // Payment OUT = CREDIT (isCredit = true) → money given to customer → INCREASE balance (add)
       double runningBalance = openingAmount;
       for (var doc in docs.reversed) {
-        row++;
         final data = doc.data() as Map<String, dynamic>;
         final createdAt = data['createdAt'] as Timestamp?;
         final amount = (data['amount'] ?? 0).toDouble();
@@ -713,86 +647,52 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         final description = data['description'] ?? 'No description';
 
         if (isCredit) {
-          runningBalance += amount; // Payment OUT increases what customer owes
+          runningBalance += amount;
         } else {
-          runningBalance -= amount; // Payment IN reduces what customer owes
+          runningBalance -= amount;
         }
 
-        sheetObject
-            .cell(
-              excel.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row),
-            )
-            .value = excel.TextCellValue(
-          createdAt != null ? _formatDate(createdAt) : 'N/A',
+        htmlContent.writeln('<tr>');
+        htmlContent.writeln(
+          '<td>${createdAt != null ? _formatDate(createdAt) : 'N/A'}</td>',
         );
-        sheetObject
-            .cell(
-              excel.CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: row),
-            )
-            .value = excel.TextCellValue(
-          createdAt != null ? _formatTime(createdAt) : 'N/A',
+        htmlContent.writeln(
+          '<td>${createdAt != null ? _formatTime(createdAt) : 'N/A'}</td>',
         );
-        sheetObject
-            .cell(
-              excel.CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: row),
-            )
-            .value = excel.TextCellValue(
-          description,
-        );
-        sheetObject
-            .cell(
-              excel.CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: row),
-            )
-            .value = excel.TextCellValue(
-          // Payment IN = DEBIT (isCredit = false) → "Payment In"
-          // Payment OUT = CREDIT (isCredit = true) → "Payment Out"
-          isCredit ? 'Payment Out' : 'Payment In',
-        );
-        sheetObject
-            .cell(
-              excel.CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: row),
-            )
-            .value = excel.DoubleCellValue(
-          amount,
-        );
-        sheetObject
-            .cell(
-              excel.CellIndex.indexByColumnRow(columnIndex: 5, rowIndex: row),
-            )
-            .value = excel.DoubleCellValue(
-          runningBalance,
-        );
+        htmlContent.writeln('<td>$description</td>');
+        htmlContent.writeln('<td>${isCredit ? 'Payment Out' : 'Payment In'}</td>');
+        htmlContent.writeln('<td>₹${_formatAmount(amount)}</td>');
+        htmlContent.writeln('<td>₹${_formatAmount(runningBalance)}</td>');
+        htmlContent.writeln('</tr>');
       }
 
-      // Add final balance
-      row += 2;
-      sheetObject
-          .cell(excel.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row))
-          .value = excel.TextCellValue(
-        'Current Balance:',
-      );
-      var balanceCell = sheetObject.cell(
-        excel.CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: row),
-      );
-      balanceCell.value = excel.DoubleCellValue(runningBalance);
-      balanceCell.cellStyle = excel.CellStyle(
-        bold: true,
-        fontColorHex: runningBalance >= 0
-            ? excel.ExcelColor.red
-            : excel.ExcelColor.green,
-      );
+      // Final Balance
+      htmlContent.writeln('<tr style="background-color: #E8F5E9;">');
+      htmlContent.writeln('<td colspan="5"><b>Current Balance:</b></td>');
+      htmlContent.writeln('<td><b>₹${_formatAmount(runningBalance)}</b></td>');
+      htmlContent.writeln('</tr>');
 
-      // Save Excel file
-      final output = await getApplicationDocumentsDirectory();
-      final fileName =
-          '${widget.customerName.replaceAll(' ', '_')}_transactions_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.xlsx';
-      final file = File('${output.path}/$fileName');
-      await file.writeAsBytes(excelFile.encode()!);
+      htmlContent.writeln('</table>');
+      htmlContent.writeln('</body>');
+      htmlContent.writeln('</html>');
+
+      final excelBytes = Uint8List.fromList(htmlContent.toString().codeUnits);
+
+      // Web: Trigger download as .xls file
+      final blob = html.Blob([excelBytes], 'application/vnd.ms-excel');
+      final url = html.Url.createObjectUrlFromBlob(blob);
+      final anchor = html.AnchorElement(href: url)
+        ..setAttribute(
+          'download',
+          '${widget.customerName.replaceAll(' ', '_')}_transactions_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.xls',
+        )
+        ..click();
+      html.Url.revokeObjectUrl(url);
 
       setState(() => _isDownloading = false);
 
       if (mounted) {
-        _showSuccessDialog('Excel', file.path);
+        _showSuccessDialog('Excel');
       }
     } catch (e) {
       setState(() => _isDownloading = false);
@@ -821,8 +721,8 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
     );
   }
 
-  /// 🔹 Show Success Dialog (Open and Share)
-  void _showSuccessDialog(String fileType, String filePath) async {
+  /// 🔹 Show Success Dialog (Web Only)
+  void _showSuccessDialog(String fileType) {
     final isLandscape = _isLandscape(context);
 
     showDialog(
@@ -864,7 +764,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                 ),
                 SizedBox(height: isLandscape ? 6 : 8),
                 Text(
-                  'Your file has been saved',
+                  'Your file has been saved to your browser',
                   style: TextStyle(
                     fontSize: isLandscape ? 13 : 14,
                     color: Colors.grey[600],
@@ -872,62 +772,6 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                   textAlign: TextAlign.center,
                 ),
                 SizedBox(height: isLandscape ? 20 : 24),
-
-                // Action Buttons Row
-                Row(
-                  children: [
-                    // Open Button
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: () async {
-                          Navigator.pop(context);
-                          await OpenFile.open(filePath);
-                        },
-                        icon: const Icon(Icons.open_in_new),
-                        label: const Text('Open'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF4285F4),
-                          foregroundColor: Colors.white,
-                          padding: EdgeInsets.symmetric(
-                            vertical: isLandscape ? 12 : 14,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                      ),
-                    ),
-                    SizedBox(width: isLandscape ? 10 : 12),
-                    // Share Button
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: () async {
-                          Navigator.pop(context);
-                          await Share.shareXFiles([
-                            XFile(filePath),
-                          ], text: '${widget.customerName} Transaction Report');
-                        },
-                        icon: const Icon(Icons.share),
-                        label: const Text('Share'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.white,
-                          foregroundColor: const Color(0xFF4285F4),
-                          padding: EdgeInsets.symmetric(
-                            vertical: isLandscape ? 12 : 14,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            side: const BorderSide(
-                              color: Color(0xFF4285F4),
-                              width: 1.5,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                SizedBox(height: isLandscape ? 10 : 12),
 
                 // Close Button
                 TextButton(
@@ -1047,15 +891,14 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                 // Content
                 Expanded(
                   child: FutureBuilder<DocumentSnapshot>(
-                    future:
-                        _selectedShopCollection != null &&
-                            _selectedShopCollection!.isNotEmpty
+                    future: _selectedShopCollection != null &&
+                        _selectedShopCollection!.isNotEmpty
                         ? FirebaseFirestore.instance
-                              .collection(_selectedShopCollection!)
-                              .doc('customers')
-                              .collection('list')
-                              .doc(widget.customerId)
-                              .get()
+                        .collection(_selectedShopCollection!)
+                        .doc('customers')
+                        .collection('list')
+                        .doc(widget.customerId)
+                        .get()
                         : Future.error('Shop collection not available'),
                     builder: (context, snapshot) {
                       if (snapshot.connectionState == ConnectionState.waiting) {
@@ -1113,7 +956,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                           left: isLandscape ? 20 : 24,
                           right: isLandscape ? 20 : 24,
                           top: isLandscape ? 12 : 16,
-                          bottom: isLandscape ? 16 : 20, // ✅ Extra bottom padding
+                          bottom: isLandscape ? 16 : 20,
                         ),
                         child: Column(
                           children: [
@@ -1181,12 +1024,12 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   }
 
   Widget _buildCompactDetailRow(
-    String label,
-    String value,
-    IconData icon,
-    bool isLandscape, {
-    bool isLast = false,
-  }) {
+      String label,
+      String value,
+      IconData icon,
+      bool isLandscape, {
+        bool isLast = false,
+      }) {
     return Container(
       padding: EdgeInsets.symmetric(vertical: isLandscape ? 10 : 12),
       decoration: BoxDecoration(
@@ -1241,14 +1084,14 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   }
 
   Widget _buildCustomerInfoSection(
-    bool isLandscape,
-    double balance,
-    String mobile,
-    BuildContext context,
-  ) {
+      bool isLandscape,
+      double balance,
+      String mobile,
+      BuildContext context,
+      ) {
     final bool isPositive = balance >= 0;
     final Color primaryColor =
-        isPositive ? (Colors.red[700]!) : Colors.green[700]!;
+    isPositive ? (Colors.red[700]!) : Colors.green[700]!;
 
     return Container(
       width: double.infinity,
@@ -1319,20 +1162,18 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   }
 
   Widget _buildTransactionItem(
-    Map<String, dynamic> data,
-    double startBalance,
-    bool isLandscape,
-  ) {
+      Map<String, dynamic> data,
+      double startBalance,
+      bool isLandscape,
+      ) {
     final amount = (data['amount'] ?? 0).toDouble();
     final isCredit = data['isCredit'] ?? false;
     final description = data['description'] ?? 'No description';
     final createdAt = data['createdAt'] as Timestamp?;
 
-    // Payment IN = DEBIT (isCredit = false) = GREEN (money coming in)
-    // Payment OUT = CREDIT (isCredit = true) = RED (money going out)
     final transactionColor = isCredit ? Colors.red[700] : Colors.green[700];
     final String typeLabel =
-        isCredit ? 'Credit to customer' : 'Received from customer';
+    isCredit ? 'Credit to customer' : 'Received from customer';
 
     return Column(
       children: [
@@ -1348,16 +1189,12 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                 width: isLandscape ? 40 : 46,
                 height: isLandscape ? 40 : 46,
                 decoration: BoxDecoration(
-                  // Payment IN = DEBIT (isCredit = false) = GREEN
-                  // Payment OUT = CREDIT (isCredit = true) = RED
                   color: isCredit
                       ? Colors.red.withOpacity(0.1)
                       : Colors.green.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(
-                  // Payment IN (isCredit=false) = money coming in = arrow up
-                  // Payment OUT (isCredit=true) = money going out = arrow down
                   isCredit ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_up,
                   color: transactionColor,
                   size: isLandscape ? 20 : 22,
@@ -1456,8 +1293,8 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         builder: (pageContext) => BalanceDetailsScreen(
           shopCollection: _selectedShopCollection!,
           customerId: widget.customerId,
-                                        ),
-                                      ),
+        ),
+      ),
     );
   }
 
@@ -1494,7 +1331,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         actions: [
           FutureBuilder<Map<String, dynamic>>(
             future: _getCustomerData(),
-                            builder: (context, snapshot) {
+            builder: (context, snapshot) {
               final mobile = snapshot.data?['mobile'] ?? '';
 
               return IconButton(
@@ -1596,13 +1433,11 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                   final transactions = snapshot.data?.docs ?? [];
 
                   // Calculate balance and per-transaction starting balances
-                  // Payment IN = DEBIT (isCredit = false) → money received from customer → REDUCE balance (subtract)
-                  // Payment OUT = CREDIT (isCredit = true) → money given to customer → INCREASE balance (add)
                   double balance = openingAmount;
 
                   // Build map of start balance per transaction (in chronological order)
                   final List<QueryDocumentSnapshot> chronologicalTx =
-                      List<QueryDocumentSnapshot>.from(transactions.reversed);
+                  List<QueryDocumentSnapshot>.from(transactions.reversed);
                   final Map<String, double> startBalanceById = {};
 
                   for (final doc in chronologicalTx) {
@@ -1614,9 +1449,9 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                     startBalanceById[doc.id] = balance;
 
                     if (isCredit) {
-                      balance += amount; // Payment OUT increases what customer owes
+                      balance += amount;
                     } else {
-                      balance -= amount; // Payment IN reduces what customer owes
+                      balance -= amount;
                     }
                   }
 
@@ -1634,54 +1469,54 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                       Expanded(
                         child: transactions.isEmpty
                             ? Center(
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(
-                                      Icons.receipt_long_outlined,
-                                      size: isLandscape ? 56 : 64,
-                                      color: Colors.grey[400],
-                                    ),
-                                    SizedBox(height: isLandscape ? 12 : 16),
-                                    Text(
-                                      'No transactions found',
-                                      style: TextStyle(
-                                        fontSize: isLandscape ? 16 : 18,
-                                        fontWeight: FontWeight.w600,
-                                        color: Colors.grey,
-                                      ),
-                                    ),
-                                    SizedBox(height: isLandscape ? 6 : 8),
-                                    Text(
-                                      'Transactions will appear here',
-                                      style: TextStyle(
-                                        fontSize: isLandscape ? 13 : 14,
-                                        color: Colors.grey[600],
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              )
-                            : Container(
-                                color: Colors.white,
-                                child: ListView.builder(
-                                  itemCount: transactions.length,
-                                  itemBuilder: (context, index) {
-                                    final doc = transactions[index];
-                                    final data =
-                                        doc.data() as Map<String, dynamic>;
-                                    final String docId = doc.id;
-                                    final startBalance =
-                                        startBalanceById[docId] ??
-                                            openingAmount;
-                                    return _buildTransactionItem(
-                                      data,
-                                      startBalance,
-                                      isLandscape,
-                                    );
-                                  },
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.receipt_long_outlined,
+                                size: isLandscape ? 56 : 64,
+                                color: Colors.grey[400],
+                              ),
+                              SizedBox(height: isLandscape ? 12 : 16),
+                              Text(
+                                'No transactions found',
+                                style: TextStyle(
+                                  fontSize: isLandscape ? 16 : 18,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.grey,
                                 ),
                               ),
+                              SizedBox(height: isLandscape ? 6 : 8),
+                              Text(
+                                'Transactions will appear here',
+                                style: TextStyle(
+                                  fontSize: isLandscape ? 13 : 14,
+                                  color: Colors.grey[600],
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                            : Container(
+                          color: Colors.white,
+                          child: ListView.builder(
+                            itemCount: transactions.length,
+                            itemBuilder: (context, index) {
+                              final doc = transactions[index];
+                              final data =
+                              doc.data() as Map<String, dynamic>;
+                              final String docId = doc.id;
+                              final startBalance =
+                                  startBalanceById[docId] ??
+                                      openingAmount;
+                              return _buildTransactionItem(
+                                data,
+                                startBalance,
+                                isLandscape,
+                              );
+                            },
+                          ),
+                        ),
                       ),
                     ],
                   );
@@ -1693,15 +1528,16 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
       ),
       // 🔹 Floating Action Button with Loading State
       floatingActionButton: StreamBuilder<QuerySnapshot>(
-        stream: _selectedShopCollection != null && _selectedShopCollection!.isNotEmpty
+        stream: _selectedShopCollection != null &&
+            _selectedShopCollection!.isNotEmpty
             ? FirebaseFirestore.instance
-                .collection(_selectedShopCollection!)
-                .doc('customers')
-                .collection('list')
-                .doc(widget.customerId)
-                .collection('transactions')
-                .orderBy('createdAt', descending: true)
-                .snapshots()
+            .collection(_selectedShopCollection!)
+            .doc('customers')
+            .collection('list')
+            .doc(widget.customerId)
+            .collection('transactions')
+            .orderBy('createdAt', descending: true)
+            .snapshots()
             : Stream.empty(),
         builder: (context, snapshot) {
           final docs = snapshot.data?.docs ?? [];
@@ -1711,17 +1547,17 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
             tooltip: 'Download Report',
             child: _isDownloading
                 ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                    ),
-                  )
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+              ),
+            )
                 : const Icon(Icons.download, color: Colors.white),
           );
         },
       ),
     );
   }
-  }
+}
